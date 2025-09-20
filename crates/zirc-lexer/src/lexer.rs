@@ -100,6 +100,9 @@ impl Lexer {
             }
         }
         let kind = match s.as_str() {
+            "module" => TokenKind::Module,
+            "import" => TokenKind::Import,
+            "as" => TokenKind::As,
             "fun" => TokenKind::Fun,
             "end" => TokenKind::End,
             "if" => TokenKind::If,
@@ -326,11 +329,8 @@ impl Lexer {
                             col,
                         }
                     } else {
-                        return zirc_syntax::error::error_at(
-                            line,
-                            col,
-                            "Unexpected '.' (did you mean '..'?)",
-                        );
+                        self.advance();
+                        self.make_token(TokenKind::Dot)
                     }
                 }
                 Some('"') => {
