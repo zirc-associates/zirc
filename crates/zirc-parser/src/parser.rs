@@ -41,10 +41,25 @@ impl Parser {
     pub fn parse_program(&mut self) -> Result<Program> {
         let mut items = Vec::new();
         while !self.is_eof() {
-            if matches!(self.peek().kind, TokenKind::Fun) {
-                items.push(Item::Function(self.parse_function()?));
-            } else {
-                items.push(Item::Stmt(self.parse_stmt()?));
+            match self.peek().kind.clone() {
+                TokenKind::Module => {
+                    self.advance();
+                    // module "name"
+                    let tk = self.peek().clone();
+                    match tk.kind {
+                        TokenKind::String(s) => { self.advance(); items.push(Item::Module(s)); }
+                        _ => { return zirc_syntax::error::error_at(tk.line, tk.col, "Expected module name as string literal"); }
+                    }
+                }
+                TokenKind::Import => {
+                    items.push(self.parse_import()?);
+                }
+                TokenKind::Fun => {
+                    items.push(Item::Function(self.parse_function()?));
+                }
+                _ => {
+                    items.push(Item::Stmt(self.parse_stmt()?));
+                }
             }
         }
         Ok(Program { items })
@@ -420,16 +435,22 @@ impl Parser {
                 format!("Unexpected token {:?}", tk.kind),
             ),
         }?;
-        // Postfix indexing
+        // Postfix indexing and member access
         loop {
             if matches!(self.peek().kind, TokenKind::LBracket) {
                 self.advance();
                 let idx = self.parse_expr()?;
                 self.expect(TokenKind::RBracket)?;
                 node = Expr::Index(Box::new(node), Box::new(idx));
-            } else {
-                break;
+                continue;
             }
+            if matches!(self.peek().kind, TokenKind::Dot) {
+                self.advance();
+                let field = self.consume_ident()?;
+                node = Expr::Member(Box::new(node), field);
+                continue;
+            }
+            break;
         }
         Ok(node)
     }
@@ -446,6 +467,21 @@ impl Parser {
                 format!("Expected {:?}, found {:?}", kind, tk.kind),
             )
         }
+    }
+}
+
+impl Parser {
+    fn parse_import(&mut self) -> Result<Item> {
+        // current token is 'import'
+        self.advance();
+        // expect module ident
+        let module = self.consume_ident()?;
+        let mut alias: Option<String> = None;
+        if matches!(self.peek().kind, TokenKind::As) {
+            self.advance();
+            alias = Some(self.consume_ident()?);
+        }
+        Ok(Item::Import { module, alias })
     }
 }
 
