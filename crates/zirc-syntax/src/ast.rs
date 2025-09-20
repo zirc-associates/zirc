@@ -17,6 +17,8 @@ pub enum Expr {
     LiteralString(String),
     LiteralBool(bool),
     Ident(String),
+    /// Member access like `a.b` (used for module access)
+    Member(Box<Expr>, String),
     // arithmetic
     BinaryAdd(Box<Expr>, Box<Expr>),
     BinarySub(Box<Expr>, Box<Expr>),
@@ -90,6 +92,10 @@ pub struct Function {
 /// Top-level program items.
 #[derive(Debug, Clone)]
 pub enum Item {
+    /// Module declaration: module "name"
+    Module(String),
+    /// Import declaration: import name [as alias]
+    Import { module: String, alias: Option<String> },
     Function(Function),
     Stmt(Stmt),
 }
