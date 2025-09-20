@@ -97,6 +97,15 @@ pub enum TokenKind {
     
     // === Keywords ===
     
+    /// The `module` keyword - declares the module name for this file
+    Module,
+    
+    /// The `import` keyword - imports another module
+    Import,
+    
+    /// The `as` keyword - used to alias imports
+    As,
+    
     /// The `fun` keyword - used to declare functions
     Fun,
     
@@ -150,11 +159,14 @@ pub enum TokenKind {
     /// Right parenthesis `)`
     RParen,
     
-    /// Left square bracket `[`
+    /// Left square bracket `[` 
     LBracket,
     
     /// Right square bracket `]`
     RBracket,
+    
+    /// Dot `.` - used for member access
+    Dot,
     
     // === Operators ===
     
