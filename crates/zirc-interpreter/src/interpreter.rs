@@ -163,6 +163,21 @@ impl Interpreter {
             Expr::LiteralString(s) => { self.mem.strings_allocated += 1; self.mem.bytes_allocated += s.len(); Ok(Value::Str(s.clone())) }
             Expr::LiteralBool(b) => Ok(Value::Bool(*b)),
             Expr::Ident(name) => match env.get(name) { Some(b) => Ok(b.value), None => zirc_syntax::error::error(format!("Undefined variable '{}'", name)) },
+            Expr::Member(base, field) => {
+                // Resolve qualified names like a.b (and nested) as a single global identifier.
+                fn qualify(e: &Expr, tail: &str) -> Option<String> {
+                    match e {
+                        Expr::Ident(n) => Some(format!("{}.{}", n, tail)),
+                        Expr::Member(b, f) => qualify(b, &format!("{}.{}", f, tail)),
+                        _ => None,
+                    }
+                }
+                let qualified = qualify(base, field).ok_or_else(|| format!("member access only supported on identifiers/modules, got {:?}", base))?;
+                match env.get(&qualified) {
+                    Some(b) => Ok(b.value),
+                    None => zirc_syntax::error::error(format!("Undefined variable '{}'", qualified)),
+                }
+            }
             Expr::BinaryAdd(a, b) => match (self.eval_expr(env, a)?, self.eval_expr(env, b)?) {
                 (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
                 (Value::Str(x), Value::Str(y)) => { let r = format!("{}{}", x, y); self.mem.strings_allocated += 1; self.mem.bytes_allocated += r.len(); Ok(Value::Str(r)) }
