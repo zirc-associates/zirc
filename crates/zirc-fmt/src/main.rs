@@ -70,6 +70,20 @@ fn format_program(p: &Program) -> String {
         match item {
             Item::Function(f) => out.push_str(&format_function(f)),
             Item::Stmt(s) => out.push_str(&format_stmt(s, 0)),
+            Item::Module(name) => {
+                out.push_str("module ");
+                out.push_str(name);
+                out.push('\n');
+            }
+            Item::Import { module, alias } => {
+                out.push_str("import ");
+                out.push_str(module);
+                if let Some(a) = alias {
+                    out.push_str(" as ");
+                    out.push_str(a);
+                }
+                out.push('\n');
+            }
         }
     }
     out
@@ -229,6 +243,7 @@ fn format_expr(e: &Expr) -> String {
             }
         }
         Expr::Ident(s) => s.clone(),
+        Expr::Member(base, field) => format!("{}.{}", wrap(base), field),
         Expr::BinaryAdd(a, b) => bin("+", a, b),
         Expr::BinarySub(a, b) => bin("-", a, b),
         Expr::BinaryMul(a, b) => bin("*", a, b),
@@ -280,6 +295,7 @@ fn wrap(e: &Expr) -> String {
         | Expr::LiteralString(_)
         | Expr::LiteralBool(_)
         | Expr::Ident(_)
+        | Expr::Member(_, _)
         | Expr::Call { .. } => format_expr(e),
         _ => format!("({})", format_expr(e)),
     }
