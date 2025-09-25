@@ -191,6 +191,20 @@ pub(crate) fn new(name: String, arity: usize, global_mode: bool) -> Self {
                 }
                 Ok(())
             }
+            Expr::Member(base, field) => {
+                // Treat module access a.b (and nested) as a single global name "a.b[.c...]".
+                fn qualify(e: &Expr, tail: &str) -> Option<String> {
+                    match e {
+                        Expr::Ident(n) => Some(format!("{}.{}", n, tail)),
+                        Expr::Member(b, f) => qualify(b, &format!("{}.{}", f, tail)),
+                        _ => None,
+                    }
+                }
+                let q = qualify(base, field).ok_or_else(|| zirc_syntax::error::Error::new(format!("member access only supported on identifiers/modules, got {:?}", base)))?;
+                // Allow loading globals by qualified name regardless of local/global mode.
+                self.emit(BC::LoadGlobal(q));
+                Ok(())
+            }
             Expr::BinaryAdd(a,b) => { self.emit_expr(c,a)?; self.emit_expr(c,b)?; self.emit(BC::Add); Ok(()) }
             Expr::BinarySub(a,b) => { self.emit_expr(c,a)?; self.emit_expr(c,b)?; self.emit(BC::Sub); Ok(()) }
             Expr::BinaryMul(a,b) => { self.emit_expr(c,a)?; self.emit_expr(c,b)?; self.emit(BC::Mul); Ok(()) }
