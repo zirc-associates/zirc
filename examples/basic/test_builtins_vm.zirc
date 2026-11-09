@@ -1,4 +1,4 @@
-~ Test new built-in functions (VM compatible)
+~ Test built-in functions (VM compatible — same output as test_builtins.zirc)
 
 ~ Test len function
 let message = "Hello World"
@@ -27,3 +27,11 @@ showf("Slice 'Programming'[4:11]: '%s'", slice(text, 4, 11))
 let nums = [10, 20, 30, 40, 50]
 let subset = slice(nums, 1, 4)
 showf("List slice [10,20,30,40,50][1:4]: %s", subset)
+
+~ Test push and pop (supported by both backends)
+let mylist = [1, 2, 3]
+showf("Original list: %s", mylist)
+push(mylist, 4)
+showf("After push(4): %s", mylist)
+let popped = pop(mylist)
+showf("Popped: %d, remaining: %s", popped, mylist)
