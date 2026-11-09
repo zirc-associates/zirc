@@ -4,14 +4,14 @@
 //! It implements a tree-walking interpreter that directly executes Abstract Syntax Tree (AST) nodes
 //! produced by the parser.
 
-pub mod value;
 pub mod env;
 pub mod flow;
 pub mod interpreter;
+pub mod value;
 
-pub use value::Value;
 pub use env::Env;
 pub use interpreter::{Interpreter, MemoryStats};
+pub use value::Value;
 
 #[cfg(test)]
 mod tests {
@@ -21,11 +21,17 @@ mod tests {
 
     fn run_program(input: &str) -> Result<Option<Value>, String> {
         let mut lexer = Lexer::new(input);
-        let tokens = lexer.tokenize().map_err(|e| format!("Lex error: {}", e.msg))?;
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| format!("Lex error: {}", e.msg))?;
         let mut parser = Parser::new(tokens);
-        let program = parser.parse_program().map_err(|e| format!("Parse error: {}", e.msg))?;
+        let program = parser
+            .parse_program()
+            .map_err(|e| format!("Parse error: {}", e.msg))?;
         let mut interpreter = Interpreter::new();
-        interpreter.run_with_env(program, &mut Env::new_root()).map_err(|e| format!("Runtime error: {}", e.msg))
+        interpreter
+            .run_with_env(program, &mut Env::new_root())
+            .map_err(|e| format!("Runtime error: {}", e.msg))
     }
 
     fn expect_value(input: &str, expected: Value) {
@@ -38,15 +44,18 @@ mod tests {
 
     fn expect_unit(input: &str) {
         match run_program(input) {
-            Ok(result) => assert!(result.is_none() || result == Some(Value::Unit), "Expected unit for: {}", input),
+            Ok(result) => assert!(
+                result.is_none() || result == Some(Value::Unit),
+                "Expected unit for: {}",
+                input
+            ),
             Err(e) => panic!("Program failed: {}\nInput: {}", e, input),
         }
     }
 
     fn expect_error(input: &str) {
-        match run_program(input) {
-            Ok(_) => panic!("Expected error but program succeeded: {}", input),
-            Err(_) => {}, // Good, we expected an error
+        if run_program(input).is_ok() {
+            panic!("Expected error but program succeeded: {}", input);
         }
     }
 
@@ -70,7 +79,10 @@ mod tests {
 
     #[test]
     fn test_string_operations() {
-        expect_value("\"hello\" + \" \" + \"world\"", Value::Str("hello world".to_string()));
+        expect_value(
+            "\"hello\" + \" \" + \"world\"",
+            Value::Str("hello world".to_string()),
+        );
         expect_value("\"test\"[0]", Value::Str("t".to_string()));
         expect_value("\"test\"[1]", Value::Str("e".to_string()));
     }
@@ -105,10 +117,21 @@ mod tests {
 
     #[test]
     fn test_lists() {
-        expect_value("[1, 2, 3]", Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
+        expect_value(
+            "[1, 2, 3]",
+            Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]),
+        );
         expect_value("[]", Value::List(vec![]));
         expect_value("[1, 2, 3][1]", Value::Int(2));
-        expect_value("[1, 2] + [3, 4]", Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4)]));
+        expect_value(
+            "[1, 2] + [3, 4]",
+            Value::List(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3),
+                Value::Int(4),
+            ]),
+        );
     }
 
     #[test]
@@ -128,7 +151,10 @@ mod tests {
     fn test_functions() {
         expect_value("fun double(x): x * 2 end\ndouble(21)", Value::Int(42));
         expect_value("fun add(x, y): x + y end\nadd(10, 20)", Value::Int(30));
-        expect_value("fun fact(n): if n == 0: 1 else: n * fact(n - 1) end end\nfact(5)", Value::Int(120));
+        expect_value(
+            "fun fact(n): if n == 0: 1 else: n * fact(n - 1) end end\nfact(5)",
+            Value::Int(120),
+        );
     }
 
     #[test]
@@ -140,7 +166,10 @@ mod tests {
 
         // Test slice
         expect_value("slice(\"hello\", 1, 4)", Value::Str("ell".to_string()));
-        expect_value("slice([1, 2, 3, 4, 5], 1, 4)", Value::List(vec![Value::Int(2), Value::Int(3), Value::Int(4)]));
+        expect_value(
+            "slice([1, 2, 3, 4, 5], 1, 4)",
+            Value::List(vec![Value::Int(2), Value::Int(3), Value::Int(4)]),
+        );
     }
 
     #[test]
@@ -157,6 +186,33 @@ mod tests {
         expect_value("let x: int = 42\nx", Value::Int(42));
         expect_error("let x: int = \"string\""); // Type mismatch
         expect_error("let x: string = 42"); // Type mismatch
+    }
+
+    #[test]
+    fn test_division_by_zero_is_error() {
+        expect_error("10 / 0");
+        expect_error("let x = 1\nx / 0");
+    }
+
+    #[test]
+    fn test_list_type_annotation() {
+        expect_value(
+            "let xs: list = [1, 2]\nxs",
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+        );
+        expect_error("let xs: list = 42");
+    }
+
+    #[test]
+    fn test_block_scoping() {
+        // `let` inside an if-block does not leak out.
+        expect_error("if true: let y = 1 end\ny");
+        // Loop variable is scoped to the loop.
+        expect_error("for i in 0..3: show(i) end\ni");
+        // Assignments to outer bindings persist after a block.
+        expect_value("let x = 1\nif true: x = 42 end\nx", Value::Int(42));
+        // A pre-existing loop variable is restored after the loop.
+        expect_value("let i = 99\nfor i in 0..2: show(i) end\ni", Value::Int(99));
     }
 
     #[test]
@@ -181,6 +237,15 @@ mod tests {
             end
             doubled
         "#;
-        expect_value(list_processing, Value::List(vec![Value::Int(2), Value::Int(4), Value::Int(6), Value::Int(8), Value::Int(10)]));
+        expect_value(
+            list_processing,
+            Value::List(vec![
+                Value::Int(2),
+                Value::Int(4),
+                Value::Int(6),
+                Value::Int(8),
+                Value::Int(10),
+            ]),
+        );
     }
 }
