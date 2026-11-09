@@ -1,0 +1,49 @@
+~ Zirc stdlib: math module
+~ Import with: import math
+~ Call qualified: math.gcd(a, b)  (or unqualified: gcd(a, b))
+module "math"
+
+fun gcd(a, b):
+  while b != 0:
+    let t = b
+    b = a - (a / b) * b
+    a = t
+  end
+  return a
+end
+
+fun lcm(a, b):
+  return (a / gcd(a, b)) * b
+end
+
+fun clamp(x, lo, hi):
+  if x < lo:
+    return lo
+  end
+  if x > hi:
+    return hi
+  end
+  return x
+end
+
+fun is_prime(n):
+  if n < 2:
+    return false
+  end
+  let i = 2
+  while i * i <= n:
+    if n - (n / i) * i == 0:
+      return false
+    end
+    i = i + 1
+  end
+  return true
+end
+
+fun sum_range(n):
+  let total = 0
+  for i in 0..n + 1:
+    total = total + i
+  end
+  return total
+end
