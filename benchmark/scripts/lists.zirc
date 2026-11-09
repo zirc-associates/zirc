@@ -1,0 +1,10 @@
+~ Benchmark: list push/index/len
+let xs = []
+for i in 0..1000:
+  push(xs, i * i)
+end
+let total = 0
+for i in 0..len(xs):
+  total = total + xs[i]
+end
+showf("total=%d len=%d", total, len(xs))
