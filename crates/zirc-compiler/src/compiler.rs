@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use zirc_bytecode::{Function as BcFunction, Instruction as BC, Program as BcProgram};
 use zirc_syntax::ast::*;
-use zirc_syntax::error::{Result, error};
+use zirc_syntax::error::{error, Result};
 
 use crate::builder::FuncBuilder;
 
@@ -13,11 +13,18 @@ pub struct Compiler {
     pub(crate) functions: Vec<BcFunction>,
 }
 
-impl Default for Compiler { fn default() -> Self { Self::new() } }
+impl Default for Compiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Compiler {
     pub fn new() -> Self {
-        Self { func_indices: HashMap::new(), functions: Vec::new() }
+        Self {
+            func_indices: HashMap::new(),
+            functions: Vec::new(),
+        }
     }
 
     pub fn function_names(&self) -> Vec<String> {
@@ -27,19 +34,38 @@ impl Compiler {
     }
 
     pub fn compile(&mut self, program: Program) -> Result<BcProgram> {
+        // Imports must be expanded by the module loader (CLI) first.
+        for item in &program.items {
+            if let ItemKind::Import { module, .. } = &item.kind {
+                return error(format!(
+                    "import {} requires the module loader (use the zirc CLI)",
+                    module
+                ));
+            }
+        }
         // First pass: collect function names to assign indices
         for item in &program.items {
-            if let Item::Function(f) = item {
-                if self.func_indices.contains_key(&f.name) { return error(format!("Duplicate function '{}'", f.name)); }
+            if let ItemKind::Function(f) = &item.kind {
+                if self.func_indices.contains_key(&f.name) {
+                    return error(format!("Duplicate function '{}'", f.name));
+                }
                 let idx = self.functions.len();
                 self.func_indices.insert(f.name.clone(), idx);
-                self.functions.push(BcFunction { name: f.name.clone(), arity: f.params.len(), local_count: 0, code: Vec::new() });
+                self.functions.push(BcFunction {
+                    name: f.name.clone(),
+                    arity: f.params.len(),
+                    local_count: 0,
+                    code: Vec::new(),
+                    debug: Vec::new(),
+                });
             }
         }
         // Second pass: compile functions
         for item in &program.items {
-            if let Item::Function(f) = item {
-                let idx = *self.func_indices.get(&f.name).unwrap();
+            if let ItemKind::Function(f) = &item.kind {
+                let idx = *self.func_indices.get(&f.name).ok_or_else(|| {
+                    zirc_syntax::error::Error::new(format!("Undefined function '{}'", f.name))
+                })?;
                 let compiled = self.compile_function(f)?;
                 self.functions[idx] = compiled;
             }
@@ -47,55 +73,57 @@ impl Compiler {
         // Compile main (top-level statements)
         let mut main_builder = FuncBuilder::new("__main".to_string(), 0, true);
         for item in program.items.into_iter() {
-            if let Item::Stmt(s) = item { main_builder.emit_stmt(self, &s)?; }
+            if let ItemKind::Stmt(s) = item.kind {
+                main_builder.emit_stmt(self, &s)?;
+            }
         }
         main_builder.emit(BC::Halt);
         let main = main_builder.finish();
-        Ok(BcProgram { functions: self.functions.clone(), main })
+        // Constant folding runs on every compiled program; the VM
+        // only ever executes optimized bytecode.
+        Ok(zirc_bytecode::optimize::optimize_program(BcProgram {
+            version: zirc_bytecode::BYTECODE_VERSION,
+            functions: self.functions.clone(),
+            main,
+        }))
+    }
+
+    /// Compile an anonymous closure as a synthetic function.
+    /// Its locals are params followed by captures (free variables,
+    /// in free-var order). Returns the synthetic function's index.
+    pub(crate) fn compile_closure(&mut self, f: &Function, captures: Vec<String>) -> Result<usize> {
+        let name = format!("__closure_{}", self.functions.len());
+        let mut b = FuncBuilder::new(name.clone(), f.params.len(), false)
+            .with_return_type(f.return_type.clone());
+        for p in &f.params {
+            b.declare_param_typed(p.name.clone(), p.ty.clone())?;
+            b.emit_param_check();
+        }
+        for cap in &captures {
+            b.declare_param(cap.clone())?;
+        }
+        b.emit_function_body(self, &f.body)?;
+        let compiled = b.finish();
+        let idx = self.functions.len();
+        self.functions.push(compiled);
+        self.func_indices.insert(name, idx);
+        Ok(idx)
     }
 
     fn compile_function(&mut self, f: &Function) -> Result<BcFunction> {
-        let mut b = FuncBuilder::new(f.name.clone(), f.params.len(), false);
-        for p in &f.params { b.declare_param(p.name.clone())?; }
-        for s in &f.body { b.emit_stmt(self, s)?; }
-        b.emit(BC::PushUnit);
-        b.emit(BC::Return);
+        let mut b = FuncBuilder::new(f.name.clone(), f.params.len(), false)
+            .with_return_type(f.return_type.clone());
+        for p in &f.params {
+            b.declare_param_typed(p.name.clone(), p.ty.clone())?;
+            b.emit_param_check();
+        }
+        b.emit_function_body(self, &f.body)?;
         Ok(b.finish())
     }
 }
 
+/// Resolve a builtin by name through the single registry in
+/// `zirc-bytecode` (also used by the interpreter dispatch).
 pub(crate) fn builtin_of(name: &str) -> Option<zirc_bytecode::Builtin> {
-    match name {
-        "show" => Some(zirc_bytecode::Builtin::Show),
-        "showf" => Some(zirc_bytecode::Builtin::ShowF),
-        "prompt" => Some(zirc_bytecode::Builtin::Prompt),
-        "rf" => Some(zirc_bytecode::Builtin::Rf),
-        "wf" => Some(zirc_bytecode::Builtin::Wf),
-        "len" => Some(zirc_bytecode::Builtin::Len),
-        "push" => Some(zirc_bytecode::Builtin::Push),
-        "pop" => Some(zirc_bytecode::Builtin::Pop),
-        "slice" => Some(zirc_bytecode::Builtin::Slice),
-        // Mathematical functions
-        "abs" => Some(zirc_bytecode::Builtin::Abs),
-        "min" => Some(zirc_bytecode::Builtin::Min),
-        "max" => Some(zirc_bytecode::Builtin::Max),
-        "pow" => Some(zirc_bytecode::Builtin::Pow),
-        "sqrt" => Some(zirc_bytecode::Builtin::Sqrt),
-        // TODO: check if hex/bin need special handling here or move separately
-        "bin" => Some(zirc_bytecode::Builtin::Bin),
-        "hex" => Some(zirc_bytecode::Builtin::Hex),
-        // String functions
-        "upper" => Some(zirc_bytecode::Builtin::Upper),
-        "lower" => Some(zirc_bytecode::Builtin::Lower),
-        "trim" => Some(zirc_bytecode::Builtin::Trim),
-        "split" => Some(zirc_bytecode::Builtin::Split),
-        "join" => Some(zirc_bytecode::Builtin::Join),
-        // Type conversion
-        "int" => Some(zirc_bytecode::Builtin::Int),
-        "str" => Some(zirc_bytecode::Builtin::Str),
-        // Utility functions
-        "type" => Some(zirc_bytecode::Builtin::Type),
-        _ => None,
-    }
+    zirc_bytecode::Builtin::from_name(name)
 }
-
