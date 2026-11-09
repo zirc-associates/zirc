@@ -13,6 +13,7 @@ categories.workspace = true
 
 [dependencies]
 zirc-syntax.workspace = true
+zirc-bytecode.workspace = true
 
 [dev-dependencies]
 zirc-lexer.workspace = true
