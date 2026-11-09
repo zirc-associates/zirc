@@ -53,6 +53,63 @@
 
 use std::fmt;
 
+/// Classification of a Zirc error, independent of its message text.
+///
+/// Callers must match on this kind (not on message substrings) when
+/// reacting programmatically to an error. The human-readable `msg`
+/// remains free to evolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ErrorKind {
+    /// Unclassified / generic error (default, kept for compatibility).
+    #[default]
+    General,
+    /// Lexical analysis failed (bad character, unterminated string, ...).
+    Lex,
+    /// Parsing failed (unexpected token, missing `end`, ...).
+    Parse,
+    /// Compilation to bytecode failed.
+    Compile,
+    /// Runtime evaluation failed in the tree-walking interpreter.
+    Runtime,
+    /// Execution failed in the bytecode VM (stack underflow, div by zero, ...).
+    Vm,
+    /// I/O failure (reading/writing files, stdin/stdout).
+    Io,
+    /// Type mismatch against a declared annotation.
+    Type,
+    /// Undefined variable or function.
+    Undefined,
+}
+
+/// Source span: 1-based line/column where a token or error originated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Span {
+    /// 1-based line number.
+    pub line: usize,
+    /// 1-based column number.
+    pub col: usize,
+}
+
+impl Span {
+    /// Create a span from a 1-based line and column.
+    pub fn new(line: usize, col: usize) -> Self {
+        Self { line, col }
+    }
+}
+
+/// Synthetic spans (built by tools, not the parser) point at 1:1.
+impl Default for Span {
+    fn default() -> Self {
+        Self { line: 1, col: 1 }
+    }
+}
+
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.line, self.col)
+    }
+}
+
 /// An error that occurred during Zirc language processing.
 ///
 /// This structure represents all types of errors that can occur in the Zirc toolchain,
@@ -94,12 +151,15 @@ use std::fmt;
 pub struct Error {
     /// Human-readable error message
     pub msg: String,
-    
+
     /// Optional line number in source file (1-based)
     pub line: Option<usize>,
-    
+
     /// Optional column number in source file (1-based)
     pub col: Option<usize>,
+
+    /// Machine-readable classification (match on this, not on `msg`).
+    pub kind: ErrorKind,
 }
 
 impl Error {
@@ -121,9 +181,55 @@ impl Error {
             msg: msg.into(),
             line: None,
             col: None,
+            kind: ErrorKind::General,
         }
     }
-    
+
+    /// Create an error of the given kind, without source location.
+    pub fn of_kind(kind: ErrorKind, msg: impl Into<String>) -> Self {
+        Self {
+            msg: msg.into(),
+            line: None,
+            col: None,
+            kind,
+        }
+    }
+
+    /// Create an error of the given kind at a source location.
+    pub fn at(kind: ErrorKind, msg: impl Into<String>, line: usize, col: usize) -> Self {
+        Self {
+            msg: msg.into(),
+            line: Some(line),
+            col: Some(col),
+            kind,
+        }
+    }
+
+    /// Source span of this error, if it carries a location.
+    pub fn span(&self) -> Option<Span> {
+        match (self.line, self.col) {
+            (Some(line), Some(col)) => Some(Span::new(line, col)),
+            _ => None,
+        }
+    }
+
+    /// Builder: set the error kind, keeping message and location.
+    pub fn with_kind(mut self, kind: ErrorKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    /// Attach a span only if this error does not already carry a
+    /// location (engines use this to surface the current
+    /// statement's span on unlocated runtime errors).
+    pub fn with_span_if_missing(mut self, span: Span) -> Self {
+        if self.line.is_none() {
+            self.line = Some(span.line);
+            self.col = Some(span.col);
+        }
+        self
+    }
+
     /// Creates a new error with the given message and source location.
     ///
     /// This should be used for syntax errors, parse errors, or other issues
@@ -142,7 +248,7 @@ impl Error {
     ///
     /// // Error at line 5, column 12
     /// let error = Error::with_span("Unexpected token 'if'", 5, 12);
-    /// 
+    ///
     /// // The error will format as: "Unexpected token 'if' at 5:12"
     /// println!("{}", error);
     /// ```
@@ -151,9 +257,12 @@ impl Error {
             msg: msg.into(),
             line: Some(line),
             col: Some(col),
+            kind: ErrorKind::General,
         }
     }
 }
+
+impl std::error::Error for Error {}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -242,4 +351,17 @@ pub fn error<T>(msg: impl Into<String>) -> Result<T> {
 /// ```
 pub fn error_at<T>(line: usize, col: usize, msg: impl Into<String>) -> Result<T> {
     Err(Error::with_span(msg, line, col))
+}
+
+/// Convenience function to create an error result with a kind and
+/// source location. Prefer this over [`error_at`] in the lexer
+/// (kind `Lex`) and parser (kind `Parse`) so callers can classify
+/// failures programmatically.
+pub fn error_at_kind<T>(
+    kind: ErrorKind,
+    line: usize,
+    col: usize,
+    msg: impl Into<String>,
+) -> Result<T> {
+    Err(Error::at(kind, msg, line, col))
 }
