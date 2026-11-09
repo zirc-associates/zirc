@@ -1,21 +1,73 @@
 use zirc_syntax::ast::*;
-use zirc_syntax::error::Result;
+use zirc_syntax::error::{Result, Span};
 use zirc_syntax::token::{Token, TokenKind};
 
 /// Builds an AST from a token stream handwritten recursive-descent parser with precedence climbing.
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// `(index of next real token, comment text)` for every
+    /// `Comment` token, in source order. Comments are recorded
+    /// here instead of interleaving with real tokens, so they
+    /// never disturb parsing; [`Parser::drain_comments`] reattaches
+    /// them as `Item::Comment`/`Stmt::Comment` at item boundaries.
+    comments: Vec<(usize, String)>,
 }
 
 impl Parser {
     /// Create a new parser from a vector of tokens.
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+    ///
+    /// An empty token vector is treated as an empty (EOF-only)
+    /// program instead of panicking on `peek`. `Comment` tokens are
+    /// separated out and preserved (see [`Parser::comments`]).
+    pub fn new(mut tokens: Vec<Token>) -> Self {
+        if tokens.is_empty() {
+            tokens.push(Token {
+                kind: TokenKind::Eof,
+                line: 1,
+                col: 1,
+            });
+        }
+        let mut comments: Vec<(usize, String)> = Vec::new();
+        let mut real: Vec<Token> = Vec::with_capacity(tokens.len());
+        for tk in tokens {
+            match tk.kind {
+                TokenKind::Comment(text) => comments.push((real.len(), text)),
+                _ => real.push(tk),
+            }
+        }
+        Self {
+            tokens: real,
+            pos: 0,
+            comments,
+        }
+    }
+
+    /// Drain (in source order) every comment whose following real
+    /// token is at or before the current position.
+    fn drain_comments(&mut self) -> Vec<String> {
+        let pos = self.pos;
+        let mut drained = Vec::new();
+        let mut rest = Vec::new();
+        for (idx, text) in self.comments.drain(..) {
+            if idx <= pos {
+                drained.push(text);
+            } else {
+                rest.push((idx, text));
+            }
+        }
+        self.comments = rest;
+        drained
     }
 
     fn peek(&self) -> &Token {
-        self.tokens.get(self.pos).unwrap()
+        // `new` guarantees at least an EOF token, and `advance` never
+        // moves past it, so this index is always in bounds.
+        self.tokens.get(self.pos).unwrap_or_else(|| {
+            self.tokens
+                .last()
+                .expect("parser always has at least an EOF token")
+        })
     }
     fn is_eof(&self) -> bool {
         matches!(self.peek().kind, TokenKind::Eof)
@@ -33,32 +85,77 @@ impl Parser {
                 self.advance();
                 Ok(name)
             }
-            _ => zirc_syntax::error::error_at(tk.line, tk.col, "Expected identifier"),
+            _ => zirc_syntax::error::error_at_kind(
+                zirc_syntax::error::ErrorKind::Parse,
+                tk.line,
+                tk.col,
+                "Expected identifier",
+            ),
         }
+    }
+
+    /// Span of the token at the cursor.
+    fn span_here(&self) -> Span {
+        let tk = self.peek();
+        Span::new(tk.line, tk.col)
     }
 
     /// Parse a full program (sequence of items until Eof).
     pub fn parse_program(&mut self) -> Result<Program> {
         let mut items = Vec::new();
-        while !self.is_eof() {
+        loop {
+            // Comments before the next item become items themselves.
+            for text in self.drain_comments() {
+                items.push(Item {
+                    span: Span::default(),
+                    kind: ItemKind::Comment(text),
+                });
+            }
+            if self.is_eof() {
+                break;
+            }
             match self.peek().kind.clone() {
                 TokenKind::Module => {
+                    let span = self.span_here();
                     self.advance();
                     // module "name"
                     let tk = self.peek().clone();
                     match tk.kind {
-                        TokenKind::String(s) => { self.advance(); items.push(Item::Module(s)); }
-                        _ => { return zirc_syntax::error::error_at(tk.line, tk.col, "Expected module name as string literal"); }
+                        TokenKind::String(s) => {
+                            self.advance();
+                            items.push(Item {
+                                span,
+                                kind: ItemKind::Module(s),
+                            });
+                        }
+                        _ => {
+                            return zirc_syntax::error::error_at_kind(
+                                zirc_syntax::error::ErrorKind::Parse,
+                                tk.line,
+                                tk.col,
+                                "Expected module name as string literal",
+                            );
+                        }
                     }
                 }
                 TokenKind::Import => {
                     items.push(self.parse_import()?);
                 }
                 TokenKind::Fun => {
-                    items.push(Item::Function(self.parse_function()?));
+                    let span = self.span_here();
+                    let f = self.parse_function()?;
+                    items.push(Item {
+                        span,
+                        kind: ItemKind::Function(f),
+                    });
                 }
                 _ => {
-                    items.push(Item::Stmt(self.parse_stmt()?));
+                    let span = self.span_here();
+                    let s = self.parse_stmt()?;
+                    items.push(Item {
+                        span,
+                        kind: ItemKind::Stmt(s),
+                    });
                 }
             }
         }
@@ -69,12 +166,14 @@ impl Parser {
         let name = self.consume_ident()?;
         let ty = match name.as_str() {
             "int" => Type::Int,
+            "float" => Type::Float,
             "string" => Type::String,
             "bool" => Type::Bool,
             "unit" => Type::Unit,
             "list" => Type::List,
             _ => {
-                return zirc_syntax::error::error_at(
+                return zirc_syntax::error::error_at_kind(
+                    zirc_syntax::error::ErrorKind::Parse,
                     self.peek().line,
                     self.peek().col,
                     format!("Unknown type '{}'", name),
@@ -85,8 +184,23 @@ impl Parser {
     }
 
     fn parse_function(&mut self) -> Result<Function> {
+        let span = self.span_here();
         self.expect(TokenKind::Fun)?;
         let name = self.consume_ident()?;
+        let (params, return_type, body) = self.parse_function_tail()?;
+        Ok(Function {
+            name,
+            params,
+            return_type,
+            body,
+            span,
+        })
+    }
+
+    /// Parse `(params) [(return_type)] : body end` — shared by named
+    /// functions and anonymous closures. Assumes `fun` was consumed
+    /// (and, for named functions, the name too).
+    fn parse_function_tail(&mut self) -> Result<(Vec<Param>, Option<Type>, Vec<Stmt>)> {
         self.expect(TokenKind::LParen)?;
         let mut params: Vec<Param> = Vec::new();
         if !matches!(self.peek().kind, TokenKind::RParen) {
@@ -107,27 +221,46 @@ impl Parser {
         self.expect(TokenKind::Colon)?;
         let body = self.parse_block_until_end()?;
         self.expect(TokenKind::End)?;
+        Ok((params, return_type, body))
+    }
+
+    /// Parse an anonymous closure: `fun(params): body end`.
+    fn parse_closure(&mut self) -> Result<Function> {
+        let span = self.span_here();
+        self.expect(TokenKind::Fun)?;
+        let (params, return_type, body) = self.parse_function_tail()?;
         Ok(Function {
-            name,
+            name: String::new(),
             params,
             return_type,
             body,
+            span,
         })
     }
 
     fn parse_param(&mut self) -> Result<Param> {
+        let span = self.span_here();
         let name = self.consume_ident()?;
         let mut ty = None;
         if matches!(self.peek().kind, TokenKind::Colon) {
             self.advance();
             ty = Some(self.parse_type_name()?);
         }
-        Ok(Param { name, ty })
+        Ok(Param { name, ty, span })
     }
 
     fn parse_block_until_end(&mut self) -> Result<Vec<Stmt>> {
         let mut stmts = Vec::new();
-        while !matches!(self.peek().kind, TokenKind::End | TokenKind::Eof) {
+        loop {
+            for text in self.drain_comments() {
+                stmts.push(Stmt {
+                    span: Span::default(),
+                    kind: StmtKind::Comment(text),
+                });
+            }
+            if matches!(self.peek().kind, TokenKind::End | TokenKind::Eof) {
+                break;
+            }
             stmts.push(self.parse_stmt()?);
         }
         Ok(stmts)
@@ -135,17 +268,28 @@ impl Parser {
 
     fn parse_block_until_else_or_end(&mut self) -> Result<Vec<Stmt>> {
         let mut stmts = Vec::new();
-        while !matches!(
-            self.peek().kind,
-            TokenKind::Else | TokenKind::End | TokenKind::Eof
-        ) {
+        loop {
+            for text in self.drain_comments() {
+                stmts.push(Stmt {
+                    span: Span::default(),
+                    kind: StmtKind::Comment(text),
+                });
+            }
+            if matches!(
+                self.peek().kind,
+                TokenKind::Else | TokenKind::End | TokenKind::Eof
+            ) {
+                break;
+            }
             stmts.push(self.parse_stmt()?);
         }
         Ok(stmts)
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt> {
-        match self.peek().kind.clone() {
+        let span = self.span_here();
+        let mk = |kind: StmtKind| Stmt { span, kind };
+        Ok(match self.peek().kind.clone() {
             TokenKind::Let => {
                 self.advance();
                 let name = self.consume_ident()?;
@@ -156,16 +300,16 @@ impl Parser {
                 }
                 self.expect(TokenKind::Equal)?;
                 let expr = self.parse_expr()?;
-                Ok(Stmt::Let { name, ty, expr })
+                mk(StmtKind::Let { name, ty, expr })
             }
             TokenKind::Return => {
                 self.advance();
                 // optional expression (return without value)
                 if matches!(self.peek().kind, TokenKind::End | TokenKind::Else) {
-                    Ok(Stmt::Return(None))
+                    mk(StmtKind::Return(None))
                 } else {
                     let expr = self.parse_expr()?;
-                    Ok(Stmt::Return(Some(expr)))
+                    mk(StmtKind::Return(Some(expr)))
                 }
             }
             TokenKind::If => {
@@ -180,7 +324,7 @@ impl Parser {
                     else_body = self.parse_block_until_end()?;
                 }
                 self.expect(TokenKind::End)?;
-                Ok(Stmt::If {
+                mk(StmtKind::If {
                     cond,
                     then_body,
                     else_body,
@@ -192,7 +336,7 @@ impl Parser {
                 self.expect(TokenKind::Colon)?;
                 let body = self.parse_block_until_end()?;
                 self.expect(TokenKind::End)?;
-                Ok(Stmt::While { cond, body })
+                mk(StmtKind::While { cond, body })
             }
             TokenKind::For => {
                 self.advance();
@@ -204,7 +348,7 @@ impl Parser {
                 self.expect(TokenKind::Colon)?;
                 let body = self.parse_block_until_end()?;
                 self.expect(TokenKind::End)?;
-                Ok(Stmt::For {
+                mk(StmtKind::For {
                     var,
                     start,
                     end,
@@ -213,11 +357,11 @@ impl Parser {
             }
             TokenKind::Break => {
                 self.advance();
-                Ok(Stmt::Break)
+                mk(StmtKind::Break)
             }
             TokenKind::Continue => {
                 self.advance();
-                Ok(Stmt::Continue)
+                mk(StmtKind::Continue)
             }
             TokenKind::Ident(_) => {
                 // assignment or expression statement
@@ -230,17 +374,17 @@ impl Parser {
                         self.advance();
                         self.expect(TokenKind::Equal)?;
                         let expr = self.parse_expr()?;
-                        return Ok(Stmt::Assign { name, expr });
+                        return Ok(mk(StmtKind::Assign { name, expr }));
                     }
                 }
                 let expr = self.parse_expr()?;
-                Ok(Stmt::ExprStmt(expr))
+                mk(StmtKind::ExprStmt(expr))
             }
             _ => {
                 let expr = self.parse_expr()?;
-                Ok(Stmt::ExprStmt(expr))
+                mk(StmtKind::ExprStmt(expr))
             }
-        }
+        })
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr> {
@@ -364,6 +508,11 @@ impl Parser {
                 let e = self.parse_unary()?;
                 Ok(Expr::LogicalNot(Box::new(e)))
             }
+            TokenKind::Minus => {
+                self.advance();
+                let e = self.parse_unary()?;
+                Ok(Expr::Neg(Box::new(e)))
+            }
             _ => self.parse_primary(),
         }
     }
@@ -374,6 +523,10 @@ impl Parser {
             TokenKind::Number(n) => {
                 self.advance();
                 Ok(Expr::LiteralInt(n))
+            }
+            TokenKind::Float(f) => {
+                self.advance();
+                Ok(Expr::LiteralFloat(f))
             }
             TokenKind::String(s) => {
                 self.advance();
@@ -388,11 +541,38 @@ impl Parser {
                 Ok(Expr::LiteralBool(false))
             }
             TokenKind::Ident(name) => {
-                if matches!(
-                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                // Qualified call: `mod.f(args)` / `a.b.c(args)`.
+                // Scan ahead over `(Dot Ident)*`; if a `(` follows,
+                // this is a call whose name is the dotted path.
+                let mut scan = self.pos + 1;
+                let mut is_call = matches!(
+                    self.tokens.get(scan).map(|t| &t.kind),
                     Some(TokenKind::LParen)
-                ) {
-                    self.advance();
+                );
+                while !is_call {
+                    match (
+                        self.tokens.get(scan).map(|t| &t.kind),
+                        self.tokens.get(scan + 1).map(|t| &t.kind),
+                    ) {
+                        (Some(TokenKind::Dot), Some(TokenKind::Ident(_))) => {
+                            scan += 2;
+                            is_call = matches!(
+                                self.tokens.get(scan).map(|t| &t.kind),
+                                Some(TokenKind::LParen)
+                            );
+                        }
+                        _ => break,
+                    }
+                }
+                if is_call {
+                    let mut call_name = name.clone();
+                    self.advance(); // first ident
+                    while matches!(self.peek().kind, TokenKind::Dot) {
+                        self.advance();
+                        let field = self.consume_ident()?;
+                        call_name.push('.');
+                        call_name.push_str(&field);
+                    }
                     self.expect(TokenKind::LParen)?;
                     let mut args = Vec::new();
                     if !matches!(self.peek().kind, TokenKind::RParen) {
@@ -403,11 +583,18 @@ impl Parser {
                         }
                     }
                     self.expect(TokenKind::RParen)?;
-                    Ok(Expr::Call { name, args })
+                    Ok(Expr::Call {
+                        name: call_name,
+                        args,
+                    })
                 } else {
                     self.advance();
                     Ok(Expr::Ident(name))
                 }
+            }
+            TokenKind::Fun => {
+                let f = self.parse_closure()?;
+                Ok(Expr::Closure(Box::new(f)))
             }
             TokenKind::LParen => {
                 self.advance();
@@ -429,19 +616,35 @@ impl Parser {
                 self.expect(TokenKind::RBracket)?;
                 Ok(Expr::List(elems))
             }
-            _ => zirc_syntax::error::error_at(
+            _ => zirc_syntax::error::error_at_kind(
+                zirc_syntax::error::ErrorKind::Parse,
                 tk.line,
                 tk.col,
                 format!("Unexpected token {:?}", tk.kind),
             ),
         }?;
-        // Postfix indexing and member access
+        // Postfix indexing, member access and calling a value
+        // (e.g. `(fun(x): x end)(5)`, `closures[0](5)`).
         loop {
             if matches!(self.peek().kind, TokenKind::LBracket) {
                 self.advance();
                 let idx = self.parse_expr()?;
                 self.expect(TokenKind::RBracket)?;
                 node = Expr::Index(Box::new(node), Box::new(idx));
+                continue;
+            }
+            if matches!(self.peek().kind, TokenKind::LParen) {
+                self.advance();
+                let mut args = Vec::new();
+                if !matches!(self.peek().kind, TokenKind::RParen) {
+                    args.push(self.parse_expr()?);
+                    while matches!(self.peek().kind, TokenKind::Comma) {
+                        self.advance();
+                        args.push(self.parse_expr()?);
+                    }
+                }
+                self.expect(TokenKind::RParen)?;
+                node = Expr::CallValue(Box::new(node), args);
                 continue;
             }
             if matches!(self.peek().kind, TokenKind::Dot) {
@@ -461,7 +664,8 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            zirc_syntax::error::error_at(
+            zirc_syntax::error::error_at_kind(
+                zirc_syntax::error::ErrorKind::Parse,
                 tk.line,
                 tk.col,
                 format!("Expected {:?}, found {:?}", kind, tk.kind),
@@ -472,6 +676,7 @@ impl Parser {
 
 impl Parser {
     fn parse_import(&mut self) -> Result<Item> {
+        let span = self.span_here();
         // current token is 'import'
         self.advance();
         // expect module ident
@@ -481,7 +686,9 @@ impl Parser {
             self.advance();
             alias = Some(self.consume_ident()?);
         }
-        Ok(Item::Import { module, alias })
+        Ok(Item {
+            span,
+            kind: ItemKind::Import { module, alias },
+        })
     }
 }
-
