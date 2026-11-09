@@ -1,0 +1,23 @@
+[package]
+name = "zirc-lint"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Static analysis linter for Zirc programs"
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "zirc-lint"
+path = "src/main.rs"
+
+[dependencies]
+zirc-syntax.workspace = true
+zirc-lexer.workspace = true
+zirc-parser.workspace = true
+zirc-bytecode.workspace = true
+clap.workspace = true
