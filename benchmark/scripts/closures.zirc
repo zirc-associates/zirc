@@ -1,0 +1,13 @@
+~ Benchmark: closures (factory + indirect calls)
+fun make_multiplier(k):
+  return fun(x): x * k end
+end
+
+let double = make_multiplier(2)
+let triple = make_multiplier(3)
+
+let total = 0
+for i in 0..1000:
+  total = total + double(i) + triple(i)
+end
+showf("total=%d", total)
