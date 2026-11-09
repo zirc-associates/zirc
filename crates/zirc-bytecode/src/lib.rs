@@ -3,15 +3,19 @@
 //! This crate defines a simple stack-based bytecode, a program container,
 //! and value representation used by the Zirc VM backend.
 
-pub mod value;
 pub mod builtin;
+pub mod builtins;
+pub mod disasm;
 pub mod instruction;
+pub mod optimize;
 pub mod program;
+pub mod value;
 
-pub use value::Value;
 pub use builtin::Builtin;
-pub use instruction::Instruction;
-pub use program::{Function, Program};
+pub use disasm::disassemble;
+pub use instruction::{Instruction, VarRef};
+pub use program::{Function, Program, BYTECODE_VERSION};
+pub use value::Value;
 
 #[cfg(test)]
 mod tests {
@@ -20,10 +24,13 @@ mod tests {
     #[test]
     fn test_value_equality() {
         assert_eq!(Value::Int(42), Value::Int(42));
-        assert_eq!(Value::Str("hello".to_string()), Value::Str("hello".to_string()));
+        assert_eq!(
+            Value::Str("hello".to_string()),
+            Value::Str("hello".to_string())
+        );
         assert_eq!(Value::Bool(true), Value::Bool(true));
         assert_eq!(Value::Unit, Value::Unit);
-        
+
         let list1 = Value::List(vec![Value::Int(1), Value::Int(2)]);
         let list2 = Value::List(vec![Value::Int(1), Value::Int(2)]);
         assert_eq!(list1, list2);
@@ -32,10 +39,13 @@ mod tests {
     #[test]
     fn test_value_inequality() {
         assert_ne!(Value::Int(42), Value::Int(43));
-        assert_ne!(Value::Str("hello".to_string()), Value::Str("world".to_string()));
+        assert_ne!(
+            Value::Str("hello".to_string()),
+            Value::Str("world".to_string())
+        );
         assert_ne!(Value::Bool(true), Value::Bool(false));
         assert_ne!(Value::Int(42), Value::Str("42".to_string()));
-        
+
         let list1 = Value::List(vec![Value::Int(1), Value::Int(2)]);
         let list2 = Value::List(vec![Value::Int(2), Value::Int(1)]);
         assert_ne!(list1, list2);
@@ -66,10 +76,10 @@ mod tests {
             Builtin::Pop,
             Builtin::Slice,
         ];
-        
+
         // Just test that they can be cloned and compared
         for builtin in builtins {
-            let cloned = builtin.clone();
+            let cloned = builtin;
             assert_eq!(builtin, cloned);
         }
     }
@@ -90,7 +100,7 @@ mod tests {
             Instruction::Jump(10),
             Instruction::Call(0, 2),
         ];
-        
+
         for instr in instructions {
             let cloned = instr.clone();
             assert_eq!(instr, cloned);
@@ -109,8 +119,9 @@ mod tests {
                 Instruction::Add,
                 Instruction::Return,
             ],
+            debug: Vec::new(),
         };
-        
+
         assert_eq!(function.name, "test_func");
         assert_eq!(function.arity, 2);
         assert_eq!(function.local_count, 5);
@@ -124,20 +135,23 @@ mod tests {
             arity: 0,
             local_count: 1,
             code: vec![Instruction::PushInt(42), Instruction::Return],
+            debug: Vec::new(),
         };
-        
+
         let helper_func = Function {
             name: "helper".to_string(),
             arity: 1,
             local_count: 2,
             code: vec![Instruction::LoadLocal(0), Instruction::Return],
+            debug: Vec::new(),
         };
-        
+
         let program = Program {
+            version: BYTECODE_VERSION,
             functions: vec![helper_func],
             main: main_func,
         };
-        
+
         assert_eq!(program.functions.len(), 1);
         assert_eq!(program.main.name, "main");
         assert_eq!(program.functions[0].name, "helper");
@@ -147,13 +161,10 @@ mod tests {
     fn test_nested_values() {
         let nested = Value::List(vec![
             Value::Int(1),
-            Value::List(vec![
-                Value::Str("nested".to_string()),
-                Value::Bool(true),
-            ]),
+            Value::List(vec![Value::Str("nested".to_string()), Value::Bool(true)]),
             Value::Unit,
         ]);
-        
+
         let cloned = nested.clone();
         assert_eq!(nested, cloned);
     }
