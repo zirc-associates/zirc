@@ -1,0 +1,40 @@
+~ Zirc stdlib: collections module
+~ Import with: import collections
+module "collections"
+
+fun sum(xs):
+  let total = 0
+  for i in 0..len(xs):
+    total = total + xs[i]
+  end
+  return total
+end
+
+fun max_all(xs):
+  let best = xs[0]
+  for i in 1..len(xs):
+    if xs[i] > best:
+      best = xs[i]
+    end
+  end
+  return best
+end
+
+fun contains(xs, target):
+  for i in 0..len(xs):
+    if xs[i] == target:
+      return true
+    end
+  end
+  return false
+end
+
+fun reverse(xs):
+  let out = []
+  let i = len(xs) - 1
+  while i >= 0:
+    push(out, xs[i])
+    i = i - 1
+  end
+  return out
+end
