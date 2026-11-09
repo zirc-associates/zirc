@@ -9,4 +9,4 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo [BUILD] Build completed successfully!
-echo [INFO] Binaries available at: target/release/zirc-cli.exe and target/release/zirc-repl.exe
+echo [INFO] Binaries available at: target/release/zirc.exe, target/release/zirc-repl.exe, target/release/zirc-lint.exe, target/release/zirc-lsp.exe, target/release/zirc-fmt.exe
