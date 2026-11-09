@@ -1,7 +1,8 @@
 use zirc_syntax::error::Result;
 use zirc_syntax::token::{Token, TokenKind};
 
-/// Streaming character scanner that produces tokens with positions.
+/// Character scanner that produces tokens with positions.
+/// The whole input is scanned in one pass into a `Vec<Token>`.
 pub struct Lexer {
     src: Vec<char>,
     pos: usize,
@@ -52,16 +53,30 @@ impl Lexer {
         while let Some(c) = self.peek() {
             if c.is_whitespace() {
                 self.advance();
-            } else if c == '~' {
-                while let Some(c2) = self.peek() {
-                    self.advance();
-                    if c2 == '\n' {
-                        break;
-                    }
-                }
             } else {
                 break;
             }
+        }
+    }
+
+    /// Read a `~` line comment (up to, not including, the newline)
+    /// and return it as a `Comment` token.
+    fn read_comment(&mut self) -> Token {
+        let line = self.line;
+        let col = self.col;
+        self.advance(); // consume '~'
+        let mut text = String::new();
+        while let Some(c) = self.peek() {
+            if c == '\n' {
+                break;
+            }
+            text.push(c);
+            self.advance();
+        }
+        Token {
+            kind: TokenKind::Comment(text.trim().to_string()),
+            line,
+            col,
         }
     }
 
@@ -77,11 +92,37 @@ impl Lexer {
                 break;
             }
         }
-        let val: i64 = s.parse().map_err(|_| {
-            zirc_syntax::error::Error::with_span("Invalid number", start_line, start_col)
-        })?;
+        // Fractional part only when '.' is followed by a digit, so
+        // the range operator `0..5` still lexes as `0`, `..`, `5`.
+        let mut is_float = false;
+        if self.peek() == Some('.') && self.peek_next().is_some_and(|c| c.is_ascii_digit()) {
+            is_float = true;
+            s.push('.');
+            self.advance();
+            while let Some(c) = self.peek() {
+                if c.is_ascii_digit() {
+                    s.push(c);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        let invalid = || {
+            zirc_syntax::error::Error::at(
+                zirc_syntax::error::ErrorKind::Lex,
+                "Invalid number",
+                start_line,
+                start_col,
+            )
+        };
+        let kind = if is_float {
+            TokenKind::Float(s.parse::<f64>().map_err(|_| invalid())?)
+        } else {
+            TokenKind::Number(s.parse::<i64>().map_err(|_| invalid())?)
+        };
         Ok(Token {
-            kind: TokenKind::Number(val),
+            kind,
             line: start_line,
             col: start_col,
         })
@@ -150,7 +191,8 @@ impl Lexer {
                         };
                         s.push(esc);
                     } else {
-                        return zirc_syntax::error::error_at(
+                        return zirc_syntax::error::error_at_kind(
+                            zirc_syntax::error::ErrorKind::Lex,
                             start_line,
                             start_col,
                             "Unterminated string",
@@ -160,7 +202,12 @@ impl Lexer {
                 other => s.push(other),
             }
         }
-        zirc_syntax::error::error_at(start_line, start_col, "Unterminated string")
+        zirc_syntax::error::error_at_kind(
+            zirc_syntax::error::ErrorKind::Lex,
+            start_line,
+            start_col,
+            "Unterminated string",
+        )
     }
 
     /// Tokenize the entire input into a vector of tokens ending with Eof.
@@ -295,7 +342,8 @@ impl Lexer {
                             col,
                         }
                     } else {
-                        return zirc_syntax::error::error_at(
+                        return zirc_syntax::error::error_at_kind(
+                            zirc_syntax::error::ErrorKind::Lex,
                             line,
                             col,
                             "Unexpected '&' (did you mean '&&'?)",
@@ -312,7 +360,8 @@ impl Lexer {
                             col,
                         }
                     } else {
-                        return zirc_syntax::error::error_at(
+                        return zirc_syntax::error::error_at_kind(
+                            zirc_syntax::error::ErrorKind::Lex,
                             line,
                             col,
                             "Unexpected '|' (did you mean '||'?)",
@@ -333,6 +382,7 @@ impl Lexer {
                         self.make_token(TokenKind::Dot)
                     }
                 }
+                Some('~') => self.read_comment(),
                 Some('"') => {
                     self.advance();
                     self.read_string()?
@@ -340,7 +390,8 @@ impl Lexer {
                 Some(c) if c.is_ascii_digit() => self.read_number()?,
                 Some(c) if c.is_ascii_alphabetic() || c == '_' => self.read_ident_or_keyword(),
                 Some(other) => {
-                    return zirc_syntax::error::error_at(
+                    return zirc_syntax::error::error_at_kind(
+                        zirc_syntax::error::ErrorKind::Lex,
                         line,
                         col,
                         format!("Unexpected character '{}'", other),
@@ -352,4 +403,3 @@ impl Lexer {
         Ok(tokens)
     }
 }
-
