@@ -79,142 +79,149 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // === Literals ===
-    
     /// An identifier token (variable names, function names, etc.)
-    /// 
+    ///
     /// Examples: `foo`, `my_variable`, `factorial`
     Ident(String),
-    
-    /// A numeric literal token (64-bit signed integers)
-    /// 
-    /// Examples: `42`, `-123`, `0`
+
+    /// An integer literal token (64-bit signed integers)
+    ///
+    /// Examples: `42`, `0`
     Number(i64),
-    
+
+    /// A floating-point literal token (64-bit IEEE 754)
+    ///
+    /// Examples: `1.5`, `0.25`, `3.14159`
+    Float(f64),
+
     /// A string literal token
-    /// 
+    ///
     /// Examples: `"hello"`, `"world!"`, `""`
     String(String),
-    
+
+    /// A line comment token (`~` to end of line).
+    /// The payload is the comment text without the leading `~`.
+    /// The parser records these as `Item::Comment`/`Stmt::Comment`
+    /// so tools such as the formatter can preserve them.
+    Comment(String),
+
     // === Keywords ===
-    
     /// The `module` keyword - declares the module name for this file
     Module,
-    
+
     /// The `import` keyword - imports another module
     Import,
-    
+
     /// The `as` keyword - used to alias imports
     As,
-    
+
     /// The `fun` keyword - used to declare functions
     Fun,
-    
+
     /// The `end` keyword - used to close blocks
     End,
-    
+
     /// The `if` keyword - used for conditional statements
     If,
-    
+
     /// The `else` keyword - used for alternative branches
     Else,
-    
+
     /// The `while` keyword - used for loops
     While,
-    
+
     /// The `break` keyword - used to exit loops early
     Break,
-    
+
     /// The `continue` keyword - used to skip to next loop iteration
     Continue,
-    
+
     /// The `return` keyword - used to return from functions
     Return,
-    
+
     /// The `let` keyword - used for variable declarations
     Let,
-    
+
     /// The `true` keyword - boolean literal
     True,
-    
+
     /// The `false` keyword - boolean literal
     False,
-    
+
     /// The `for` keyword - used for range-based loops
     For,
-    
+
     /// The `in` keyword - used in for-loop syntax
     In,
-    
+
     // === Punctuation ===
-    
     /// Comma separator `,`
     Comma,
-    
+
     /// Colon `:` - used in type annotations and block syntax
     Colon,
-    
+
     /// Left parenthesis `(`
     LParen,
-    
+
     /// Right parenthesis `)`
     RParen,
-    
-    /// Left square bracket `[` 
+
+    /// Left square bracket `[`
     LBracket,
-    
+
     /// Right square bracket `]`
     RBracket,
-    
+
     /// Dot `.` - used for member access
     Dot,
-    
+
     // === Operators ===
-    
     /// Assignment operator `=`
     Equal,
-    
+
     /// Addition operator `+`
     Plus,
-    
+
     /// Subtraction operator `-`
     Minus,
-    
+
     /// Multiplication operator `*`
     Star,
-    
+
     /// Division operator `/`
     Slash,
-    
+
     /// Equality comparison operator `==`
     EqEq,
-    
+
     /// Inequality comparison operator `!=`
     NotEq,
-    
+
     /// Less-than comparison operator `<`
     Less,
-    
+
     /// Less-than-or-equal comparison operator `<=`
     LessEq,
-    
+
     /// Greater-than comparison operator `>`
     Greater,
-    
+
     /// Greater-than-or-equal comparison operator `>=`
     GreaterEq,
-    
+
     /// Logical AND operator `&&`
     AndAnd,
-    
+
     /// Logical OR operator `||`
     OrOr,
-    
+
     /// Logical NOT operator `!`
     Bang,
-    
+
     /// Range operator `..` used in for-loops
     DotDot,
-    
+
     /// End-of-file marker - indicates no more tokens
     Eof,
 }
@@ -251,7 +258,7 @@ pub enum TokenKind {
 /// };
 ///
 /// // Position information is useful for error reporting
-/// println!("Token '{}' at line {}, column {}", 
+/// println!("Token '{}' at line {}, column {}",
 ///          "factorial", name_token.line, name_token.col);
 /// ```
 ///
@@ -268,10 +275,10 @@ pub enum TokenKind {
 pub struct Token {
     /// The type and semantic content of this token
     pub kind: TokenKind,
-    
+
     /// Line number in the source file (1-based)
     pub line: usize,
-    
+
     /// Column number in the source file (1-based)
     pub col: usize,
 }
