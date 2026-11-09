@@ -1,0 +1,35 @@
+~ Zirc stdlib: strings module
+~ Import with: import strings
+module "strings"
+
+fun repeat(s, n):
+  let out = ""
+  for i in 0..n:
+    out = out + s
+  end
+  return out
+end
+
+fun starts_with(s, prefix):
+  if len(prefix) > len(s):
+    return false
+  end
+  return slice(s, 0, len(prefix)) == prefix
+end
+
+fun ends_with(s, suffix):
+  if len(suffix) > len(s):
+    return false
+  end
+  return slice(s, len(s) - len(suffix), len(s)) == suffix
+end
+
+fun count_char(s, ch):
+  let count = 0
+  for i in 0..len(s):
+    if s[i] == ch:
+      count = count + 1
+    end
+  end
+  return count
+end
