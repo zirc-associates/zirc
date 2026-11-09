@@ -2,18 +2,18 @@ name: CI
 
 on:
   push:
-    branches: [ development ]
+    branches: [development, main]
   pull_request:
-    branches: [ development ]
+    branches: [development, main]
 
 jobs:
-  build:
-    name: build-test
+  check:
+    name: fmt-clippy-test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        os: [ubuntu-latest, windows-latest]
         rust: [stable]
 
     steps:
@@ -21,11 +21,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
+          components: rustfmt, clippy
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -37,9 +35,17 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Build
         run: cargo build --workspace --all-targets --color always
 
       - name: Test
         run: cargo test --workspace --all-features --color always
 
+      - name: Doc
+        run: cargo doc --workspace --no-deps
