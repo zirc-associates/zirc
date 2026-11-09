@@ -1,0 +1,14 @@
+~ Example module: geometry helpers
+module "geometry"
+
+fun area_rect(w, h):
+  return w * h
+end
+
+fun area_square(s):
+  return area_rect(s, s)
+end
+
+fun perimeter(w, h):
+  return 2 * (w + h)
+end
