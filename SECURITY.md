@@ -1,9 +1,28 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Supported versions
 
-Use this section to tell people how to report a vulnerability.
+| Version | Supported          |
+| ------- | ------------------ |
+| 0.1.x   | :white_check_mark: |
+| < 0.1   | :x: (development)   |
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+## Reporting a vulnerability
+
+Please report security issues privately by opening a **private**
+GitHub Security Advisory on this repository
+(`zirc-industries/zirc` → Security → Report a vulnerability).
+
+Do **not** open a public issue for a suspected vulnerability.
+
+What to include: affected version, steps to reproduce, and the
+impact you observe. Interpreted languages run arbitrary user
+code by design (`rf`/`wf`/`prompt` are builtins); vulnerabilities
+in scope are crashes, sandbox escapes in the VM, and memory safety
+issues in the Rust crates themselves.
+
+## What to expect
+
+- Acknowledgement within 5 business days.
+- A fix timeline communicated in the advisory thread.
+- Public disclosure with credit once a fix is released.
