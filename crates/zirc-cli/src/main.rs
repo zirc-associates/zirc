@@ -1,170 +1,77 @@
 mod common;
 mod repl;
+mod run;
 
-use std::fs;
+use clap::Parser;
+use run::Backend;
 
-use owo_colors::OwoColorize;
-use zirc_interpreter::Interpreter;
-use zirc_lexer::Lexer;
-use zirc_parser::Parser;
-use zirc_syntax::error::Error;
+/// Zirc programming language runner and REPL.
+///
+/// The bytecode VM is the canonical backend (default); the
+/// tree-walking interpreter is available with `--backend interp`.
+#[derive(Parser, Debug)]
+#[command(name = "zirc", version, about = "Run Zirc programs or start the REPL")]
+struct Args {
+    /// Execution backend: `vm` (canonical, default) or `interp`.
+    /// Falls back to the `ZIRC_BACKEND` environment variable.
+    #[arg(short, long, value_name = "BACKEND")]
+    backend: Option<String>,
 
-// VM backend imports
-use zirc_compiler::Compiler;
-use zirc_vm::Vm;
+    /// Compile to bytecode and print the disassembly instead of running.
+    #[arg(short = 'd', long = "disassemble")]
+    disassemble: bool,
 
-use crate::common::provide_error_suggestions;
-
-fn render_error(kind: &str, source: &str, err: &Error) {
-    eprintln!("{}: {}", kind.red().bold(), err.msg.red());
-    if let (Some(line), Some(col)) = (err.line, err.col) {
-        eprintln!("  --> line {}, column {}", line, col);
-        if let Some(src_line) = source.lines().nth(line - 1) {
-            let line_num_str = format!("{:3} | ", line);
-            eprintln!("     |");
-            eprintln!("{}{}", line_num_str.bright_black(), src_line);
-            
-            let mut marker = String::new();
-            marker.push_str(&" ".repeat(line_num_str.len()));
-            if col > 1 {
-                marker.push_str(&" ".repeat(col - 1));
-            }
-            marker.push_str("^");
-            eprintln!("{}{}", marker.red(), " error here".red());
-            eprintln!("     |");
-        }
-    }
-    
-    // Add helpful suggestions based on common errors
-    provide_error_suggestions(&err.msg);
-}
-
-fn parse_backend(args: &[String]) -> String {
-    // default backend is interpreter; allow --backend vm or env var ZIRC_BACKEND=vm
-    if let Ok(b) = std::env::var("ZIRC_BACKEND") {
-        return b;
-    }
-    let mut i = 1usize;
-    while i + 1 < args.len() {
-        if args[i] == "--backend" || args[i] == "-b" {
-            return args[i + 1].clone();
-        }
-        i += 1;
-    }
-    "interp".to_string()
-}
-
-fn parse_path<'a>(args: &'a [String]) -> Option<&'a str> {
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--backend" | "-b" => { i += 2; }
-            s if s.starts_with('-') => { i += 1; }
-            _ => { return Some(args[i].as_str()); }
-        }
-    }
-    None
-}
-
-fn normalize_path(p: &str) -> std::path::PathBuf {
-    let pb = std::path::PathBuf::from(p);
-    if pb.exists() {
-        return pb;
-    }
-    #[cfg(windows)]
-    {
-        let alt = p.replace('/', std::path::MAIN_SEPARATOR_STR);
-        let altpb = std::path::PathBuf::from(&alt);
-        if altpb.exists() { return altpb; }
-    }
-    pb
+    /// Path to a `.zirc` program to run. Without a path, the REPL starts.
+    path: Option<String>,
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let args = Args::parse();
 
-    // Support --version / -V for installer validation and quick checks
-    if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("Zirc {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-
-    if args.len() < 2 {
-        let backend = parse_backend(&args);
-        let mode = if backend == "vm" { repl::Backend::Vm } else { repl::Backend::Interp };
-        repl::start_repl_with_backend(mode);
-        return;
-    }
-
-    let backend = parse_backend(&args);
-
-    // first non-flag arg treated as path, skipping flag values
-    let path_str = match parse_path(&args) {
-        Some(p) => p,
-        None => {
-            let mode = if backend == "vm" { repl::Backend::Vm } else { repl::Backend::Interp };
-            repl::start_repl_with_backend(mode);
-            return;
+    let backend = match run::resolve_backend(args.backend.as_deref()) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: {}", e.msg);
+            std::process::exit(2);
         }
     };
-    let path_buf = normalize_path(path_str);
-    if !path_buf.exists() {
-        eprintln!(
-            "{}: {}",
-            "error".red().bold(),
-            format!("File not found: {}", path_str).red()
-        );
+
+    let Some(path_str) = args.path else {
+        repl::start_repl_with_backend(backend);
+        return;
+    };
+
+    let path = std::path::PathBuf::from(&path_str);
+    if !path.exists() {
+        eprintln!("error: File not found: {}", path_str);
         std::process::exit(1);
     }
-    let src = match fs::read_to_string(&path_buf) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "{}: {}",
-                "error".red().bold(),
-                format!("Failed to read {}: {}", path_buf.display(), e).red()
-            );
-            std::process::exit(1);
-        }
-    };
 
-    let mut lexer = Lexer::new(&src);
-    let tokens = match lexer.tokenize() {
-        Ok(t) => t,
-        Err(e) => {
-            render_error("Lex error", &src, &e);
-            std::process::exit(1);
-        }
-    };
-
-    let mut parser = Parser::new(tokens);
-    let program = match parser.parse_program() {
-        Ok(p) => p,
-        Err(e) => {
-            render_error("Parse error", &src, &e);
-            std::process::exit(1);
-        }
-    };
-
-    if backend == "vm" {
-        let mut compiler = Compiler::new();
-        let bprog = match compiler.compile(program) {
-            Ok(p) => p,
+    if args.disassemble {
+        match run::disassemble_file(&path) {
+            Ok(text) => print!("{text}"),
             Err(e) => {
-                render_error("Compile error", &src, &e);
+                run::render_error("Compile error", "", &e);
                 std::process::exit(1);
             }
+        }
+        return;
+    }
+
+    if let Err(e) = run::run_file(&path, backend) {
+        let source = std::fs::read_to_string(&path).unwrap_or_default();
+        let kind = match backend {
+            Backend::Vm => "VM error",
+            Backend::Interp => "Runtime error",
         };
-        let mut vm = Vm::new();
-        if let Err(e) = vm.run(&bprog) {
-            render_error("VM error", &src, &e);
-            std::process::exit(1);
-        }
-    } else {
-        let mut interp = Interpreter::new();
-        if let Err(e) = interp.run(program) {
-            render_error("Runtime error", &src, &e);
-            std::process::exit(1);
-        }
+        // Classify phase errors by kind for a precise label.
+        let kind = match e.kind {
+            zirc_syntax::error::ErrorKind::Lex => "Lex error",
+            zirc_syntax::error::ErrorKind::Parse => "Parse error",
+            zirc_syntax::error::ErrorKind::Compile => "Compile error",
+            _ => kind,
+        };
+        run::render_error(kind, &source, &e);
+        std::process::exit(1);
     }
 }
