@@ -52,10 +52,10 @@ cargo build
 cargo test --workspace
 
 # Try the REPL
-cargo run --bin zirc-cli
+cargo run -p zirc-cli --bin zirc-repl
 
 # Run an example
-cargo run --bin zirc-cli examples/basic/hello.zirc
+cargo run -p zirc-cli --bin zirc examples/basic/hello.zirc
 ```
 
 ### Development Commands
@@ -73,8 +73,11 @@ cargo test --workspace
 # Run tests for a specific crate
 cargo test --package zirc-lexer
 
-# Run with the VM backend
-cargo run --bin zirc-cli -- --backend vm program.zirc
+# Run with the VM backend (canonical default)
+cargo run -p zirc-cli --bin zirc -- --backend vm program.zirc
+
+# Run with the reference interpreter backend
+cargo run -p zirc-cli --bin zirc -- --backend interp program.zirc
 
 # Format code
 cargo fmt
@@ -98,13 +101,16 @@ zirc-language/
 │   ├── zirc-bytecode/   # Bytecode definitions
 │   ├── zirc-compiler/   # AST → bytecode compiler
 │   ├── zirc-vm/         # Virtual machine
-│   ├── zirc-cli/        # Command-line interface
-│   ├── zirc-fmt/        # Code formatter (planned)
+│   ├── zirc-cli/        # Command-line interface (binaries: zirc, zirc-repl)
+│   ├── zirc-fmt/        # Code formatter
+│   ├── zirc-lint/       # Static analysis linter
+│   ├── zirc-lsp/        # Language server
 │   └── zirc-bench/      # Benchmarking tools
 ├── examples/            # Example Zirc programs
+├── stdlib/              # Standard library modules (.zirc)
 ├── scripts/             # Build and utility scripts
-├── docs/               # Documentation
-├── LANGUAGE_SPEC.md    # Language specification
+├── docs/                # Documentation
+│   └── LANGUAGE_SPEC.md # Language specification
 ├── README.md           # Project overview
 └── CONTRIBUTING.md     # This file
 ```
