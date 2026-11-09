@@ -1,0 +1,6 @@
+~ Modules example: import geometry and call it qualified and unqualified
+import geometry
+
+showf("area_rect(3, 4) = %d", geometry.area_rect(3, 4))
+showf("area_square(5) = %d", area_square(5))
+showf("perimeter(3, 4) = %d", geometry.perimeter(3, 4))
