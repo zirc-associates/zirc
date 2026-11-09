@@ -1,0 +1,2 @@
+# Benchmark output is generated locally (zirc-bench); do not commit results.
+*.json
