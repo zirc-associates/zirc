@@ -1,3 +1,24 @@
+//! Zirc parser: builds an AST from a token stream.
+//!
+//! A hand-written recursive-descent parser with precedence climbing
+//! for binary operators. It produces a [`zirc_syntax::ast::Program`]
+//! from the tokens yielded by the lexer. Syntax failures
+//! are reported as [`zirc_syntax::error::Error`]s with kind `Parse`
+//! and a 1-based line/column span, never as panics.
+//!
+//! # Example
+//!
+//! ```rust
+//! use zirc_lexer::Lexer;
+//! use zirc_parser::Parser;
+//!
+//! let mut lexer = Lexer::new("let x = 42");
+//! let tokens = lexer.tokenize().unwrap();
+//! let mut parser = Parser::new(tokens);
+//! let program = parser.parse_program().unwrap();
+//! assert_eq!(program.items.len(), 1);
+//! ```
+
 pub mod parser;
 
 pub use parser::Parser;
@@ -5,8 +26,8 @@ pub use parser::Parser;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zirc_syntax::ast::*;
     use zirc_lexer::Lexer;
+    use zirc_syntax::ast::*;
 
     fn parse_expr_str(input: &str) -> Expr {
         let mut lexer = Lexer::new(input);
@@ -56,8 +77,14 @@ mod tests {
 
     #[test]
     fn test_logical_operations() {
-        assert!(matches!(parse_expr_str("true && false"), Expr::LogicalAnd(_, _)));
-        assert!(matches!(parse_expr_str("true || false"), Expr::LogicalOr(_, _)));
+        assert!(matches!(
+            parse_expr_str("true && false"),
+            Expr::LogicalAnd(_, _)
+        ));
+        assert!(matches!(
+            parse_expr_str("true || false"),
+            Expr::LogicalOr(_, _)
+        ));
         assert!(matches!(parse_expr_str("!true"), Expr::LogicalNot(_)));
     }
 
