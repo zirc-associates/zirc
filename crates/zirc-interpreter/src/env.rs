@@ -55,6 +55,25 @@ impl<'a> Env<'a> {
         self.vars.insert(name, Binding { value: val, ty });
     }
 
+    /// Snapshot the bindings visible in this scope. Pair with
+    /// [`Env::restore_scope`] to give a block its own scope: bindings
+    /// created inside the block are removed when it ends, while
+    /// assignments to pre-existing bindings persist.
+    pub(crate) fn enter_scope(&self) -> std::collections::HashMap<String, Binding> {
+        self.vars.clone()
+    }
+
+    /// Remove every binding that was not present in `snapshot`
+    /// (see [`Env::enter_scope`]).
+    pub(crate) fn restore_scope(&mut self, snapshot: &std::collections::HashMap<String, Binding>) {
+        self.vars.retain(|name, _| snapshot.contains_key(name));
+    }
+
+    /// Remove a binding from this scope, if present.
+    pub(crate) fn remove(&mut self, name: &str) {
+        self.vars.remove(name);
+    }
+
     pub(crate) fn assign(&mut self, name: &str, val: Value) -> Result<()> {
         if let Some(b) = self.vars.get_mut(name) {
             if let Some(t) = &b.ty {
@@ -67,4 +86,3 @@ impl<'a> Env<'a> {
         }
     }
 }
-
