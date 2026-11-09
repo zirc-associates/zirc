@@ -43,10 +43,10 @@
 //! ## Building AST nodes
 //!
 //! ```rust
-//! use zirc_syntax::{Expr, Stmt};
+//! use zirc_syntax::{Expr, Span, Stmt, StmtKind};
 //!
 //! let expr = Expr::LiteralInt(42);
-//! let stmt = Stmt::ExprStmt(expr);
+//! let stmt = Stmt { span: Span::new(1, 1), kind: StmtKind::ExprStmt(expr) };
 //! ```
 //!
 //! # Features
@@ -67,6 +67,9 @@ pub mod token;
 /// This module defines the complete AST structure for Zirc programs,
 /// including expressions, statements, types, and program structure.
 pub mod ast;
+
+/// Static analyses shared by both engines (free variables, ...).
+pub mod analysis;
 
 /// Error handling utilities and types.
 ///
