@@ -10,11 +10,14 @@ members = [
     "crates/zirc-bytecode",
     "crates/zirc-compiler",
     "crates/zirc-vm",
+    "crates/zirc-lint",
+    "crates/zirc-lsp",
+    "crates/zirc-loader",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.0.2-dev"
+version = "0.1.0"
 edition = "2021"
 authors = ["Zirc Management"]
 license = "MIT OR Apache-2.0"
@@ -34,11 +37,15 @@ zirc-interpreter = { path = "crates/zirc-interpreter" }
 zirc-bytecode = { path = "crates/zirc-bytecode" }
 zirc-compiler = { path = "crates/zirc-compiler" }
 zirc-vm = { path = "crates/zirc-vm" }
+zirc-loader = { path = "crates/zirc-loader" }
+zirc-lint = { path = "crates/zirc-lint" }
+zirc-lsp = { path = "crates/zirc-lsp" }
+zirc-fmt = { path = "crates/zirc-fmt" }
 
 # External dependencies with version management
 owo-colors = "3"
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
+clap = { version = "4", features = ["derive"] }
 windows = { version = "0.48", features = ["Win32_Foundation", "Win32_System_Console"] }
-winapi = { version = "0.3.9", features = ["winuser"] }
