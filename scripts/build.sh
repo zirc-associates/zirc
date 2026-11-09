@@ -7,4 +7,4 @@ echo "[BUILD] Building Zirc workspace..."
 cargo build --workspace --release
 
 echo "[BUILD] Build completed successfully!"
-echo "[INFO] Binaries available at: target/release/zirc-cli and target/release/zirc-repl"
+echo "[INFO] Binaries available at: target/release/zirc, target/release/zirc-repl, target/release/zirc-lint, target/release/zirc-lsp, target/release/zirc-fmt"
